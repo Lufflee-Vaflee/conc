@@ -2,8 +2,6 @@
 
 #include <atomic>
 #include <optional>
-#include <memory>
-#include "hazard_ptr.hpp"
 
 namespace conc {
 

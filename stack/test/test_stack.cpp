@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 #include "stack.hpp"
+#include "domain.hpp"
+
 #include <thread>
 #include <vector>
 #include <atomic>
