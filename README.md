@@ -70,5 +70,4 @@ Websites
 
 https://www.youtube.com/watch?v=fvcbyCYdR10&ab_channel=JonGjengset
 
-
 https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2023/p2530r3.pdf
