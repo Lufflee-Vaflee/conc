@@ -3,6 +3,7 @@
 #include <atomic>
 #include <new>
 #include <thread>
+#include <cstdint>
 
 namespace conc {
 
@@ -72,8 +73,8 @@ class hazard_pointer_domain<size> {
         retire_node* temp = new retire_node();
         temp->data = data;
 
-        temp->next = m_head_retire.load(std::memory_order_acquire);
-        while(!m_head_retire.compare_exchange_weak(temp->next, temp, std::memory_order_release));
+        temp->next = tl_head_retire.load(std::memory_order_acquire);
+        while(!tl_head_retire.compare_exchange_weak(temp->next, temp, std::memory_order_release));
     }
 
 
@@ -90,7 +91,7 @@ class hazard_pointer_domain<size> {
     }
 
     void delete_hazards() {
-        retire_node* current = m_head_retire.exchange(nullptr, std::memory_order_relaxed);
+        retire_node* current = tl_head_retire.exchange(nullptr, std::memory_order_relaxed);
 
         while(current != nullptr) {
 
@@ -126,8 +127,9 @@ class hazard_pointer_domain<size> {
     inline static const unsigned int s_default_memory_amortization = std::thread::hardware_concurrency() * 2;
 
     std::atomic<domain_hazard_node*> m_head_acquire = new domain_hazard_node();
-    alignas(std::hardware_destructive_interference_size) std::atomic<retire_node*> m_head_retire = nullptr;
 
+    inline static thread_local std::uint64_t tl_retire_list_count = 0;
+    inline static thread_local retire_node* tl_head_retire = nullptr;
 };
 
 }
