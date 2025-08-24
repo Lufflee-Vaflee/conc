@@ -42,7 +42,7 @@ FetchContent_MakeAvailable(googletest)
 # Enable testing
 enable_testing()
 
-# Add test executable
+# Add test executable for stack
 add_executable(stack_tests
     stack/test/test_stack.cpp
 )
@@ -56,6 +56,21 @@ target_link_libraries(stack_tests
         pthread
 )
 
-# Add test to CTest
+# Add allocator test executable
+add_executable(allocator_tests
+    hazard/test/test_cache_aligned.cpp
+)
+
+# Link allocator test executable with Google Test and the library
+target_link_libraries(allocator_tests
+    PRIVATE
+        ${PROJECT_NAME}
+        gtest
+        gtest_main
+        pthread
+)
+
+# Add tests to CTest
 include(GoogleTest)
 gtest_discover_tests(stack_tests)
+gtest_discover_tests(allocator_tests)

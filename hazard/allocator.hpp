@@ -1,59 +1,70 @@
 #pragma once
 
-#include <cstddef>
-#include <limits>
+#include <cstdio>
 #include <new>
 #include <type_traits>
+#include <algorithm>
 
-namespace hazard {
+namespace conc {
 
-template <class T>
-    struct allocator {
+template <class T> class cache_aligned_alloc {
+    static inline constexpr std::size_t CACHELINE_SIZE = std::hardware_destructive_interference_size;
+    static inline constexpr auto ALIGN = static_cast<std::align_val_t>(
+        std::max(alignof(T), CACHELINE_SIZE)
+    );
+
+   public:
     using value_type = T;
-    using pointer = T*;
-    using const_pointer = const T*;
-    using void_pointer = void*;
-    using const_void_pointer = const void*;
     using size_type = std::size_t;
     using difference_type = std::ptrdiff_t;
+    using pointer = T*;
+    using const_pointer = const T*;
 
-    using propagate_on_container_copy_assignment = std::false_type;
-    using propagate_on_container_move_assignment = std::true_type;
-    using propagate_on_container_swap = std::true_type;
-    using is_always_equal = std::true_type;
+    template <class U> 
+    struct rebind {
+        using other = cache_aligned_alloc<U>;
+    };
 
-    template <class U>
-    struct rebind { using other = allocator<U>; };
+   public:
+    // Propagation traits for stateless allocator
+    using propagate_on_container_copy_assignment = std::true_type;  // Stateless, so always propagate
+    using propagate_on_container_move_assignment = std::true_type;  // Stateless, so always propagate
+    using propagate_on_container_swap = std::true_type;             // Stateless, so always propagate
+    using is_always_equal = std::true_type;                        // All instances are equal (stateless)
 
-    allocator() noexcept = default;
+    // Constructors
+    cache_aligned_alloc() noexcept = default;
+    cache_aligned_alloc(const cache_aligned_alloc&) noexcept = default;
+    cache_aligned_alloc& operator=(const cache_aligned_alloc&) noexcept = default;
+    
+    template <class U> 
+    cache_aligned_alloc(const cache_aligned_alloc<U>&) noexcept {}
 
-    template <class U>
-    allocator(const allocator<U>&) noexcept {}
-
-    [[nodiscard]] pointer allocate(size_type n) {
-        if (n > max_size()) 
-            throw std::bad_alloc();
-
-        return static_cast<pointer>(::operator new(n * sizeof(T)));
+    // For stateless allocators, just return a default-constructed instance
+    cache_aligned_alloc select_on_container_copy_construction() const noexcept {
+        return cache_aligned_alloc{};
     }
 
-    void deallocate(pointer p, size_type) noexcept { 
-        ::operator delete(p); 
+    [[nodiscard]]
+    T* allocate(size_type n) {
+        return static_cast<T*>(::operator new(n * sizeof(T), ALIGN));
     }
 
-    constexpr size_type max_size() const noexcept {
-        return std::numeric_limits<size_type>::max() / (sizeof(T) ? sizeof(T) : 1);
-    }
-
-    allocator select_on_container_copy_construction() const { 
-        return *this;
+    void deallocate(T* p, size_type n) noexcept {
+        ::operator delete(p, ALIGN);
     }
 };
 
-template <class T, class U>
-constexpr bool operator==(const allocator<T>&, const allocator<U>&) noexcept { return true; }
+// Think
+template <class T>
+constexpr bool operator==(const cache_aligned_alloc<T> &, const cache_aligned_alloc<T> &) noexcept {
+    return true;
+}
 
-template <class T, class U>
-constexpr bool operator!=(const allocator<T>&, const allocator<U>&) noexcept { return false; }
+template <class T>
+constexpr bool operator!=(const cache_aligned_alloc<T> &, const cache_aligned_alloc<T> &) noexcept {
+    return false;
+}
 
-} // namespace hazard
+} // namespace conc
+

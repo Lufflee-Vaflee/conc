@@ -3,7 +3,8 @@
 #include <atomic>
 #include <new>
 #include <thread>
-#include <cstdint>
+
+#include <allocator.hpp>
 
 namespace conc {
 
@@ -128,8 +129,8 @@ class hazard_pointer_domain<size> {
 
     std::atomic<domain_hazard_node*> m_head_acquire = new domain_hazard_node();
 
-    inline static thread_local std::uint64_t tl_retire_list_count = 0;
-    inline static thread_local retire_node* tl_head_retire = nullptr;
+    inline static thread_local std::atomic<retire_node*> tl_head_retire = nullptr;
+
 };
 
 }
