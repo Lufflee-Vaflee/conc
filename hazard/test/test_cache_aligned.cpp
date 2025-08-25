@@ -4,6 +4,7 @@
 #include <type_traits>
 #include <cstring>
 #include "allocator.hpp"
+#include <deque>
 
 namespace conc::test {
 
@@ -137,6 +138,30 @@ TEST(AllocatorTest, VectorIntegration) {
     // Check that data is cache-line aligned
     constexpr auto cacheline_size = std::hardware_destructive_interference_size;
     EXPECT_EQ(reinterpret_cast<uintptr_t>(vec.data()) % cacheline_size, 0)
+        << "Vector data should be cache-line aligned";
+}
+
+// Test with STL containers
+TEST(AllocatorTest, DequeIntegration) {
+    using AllocDeq = std::deque<int, cache_aligned_alloc<int>>;
+    
+    AllocDeq deq;
+    
+    // Add some elements
+    for (int i = 0; i < 100; ++i) {
+        deq.push_back(i);
+    }
+    
+    EXPECT_EQ(deq.size(), 100);
+    
+    // Verify contents
+    for (int i = 0; i < 100; ++i) {
+        EXPECT_EQ(deq[i], i);
+    }
+    
+    // Check that data is cache-line aligned
+    constexpr auto cacheline_size = std::hardware_destructive_interference_size;
+    EXPECT_EQ(reinterpret_cast<uintptr_t>(&deq[0]) % cacheline_size, 0)
         << "Vector data should be cache-line aligned";
 }
 

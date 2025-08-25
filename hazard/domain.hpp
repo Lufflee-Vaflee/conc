@@ -3,18 +3,13 @@
 #include <atomic>
 #include <new>
 #include <thread>
+#include <vector>
 
 #include <allocator.hpp>
 
 namespace conc {
 
 using hazard_pointer_t = std::atomic<void*>;
-
-using domain_limit = std::size_t;
-
-template<domain_limit size = 0>
-class hazard_pointer_domain;
-
 
 struct alignas(std::hardware_destructive_interference_size) 
 domain_hazard_node {
@@ -24,18 +19,9 @@ domain_hazard_node {
     std::atomic<void*> pointer;
 };
 
-
-struct retire_node {
-    retire_node* next = nullptr;
-
-    void* data;
-};
-
-template<std::size_t size>
-requires(size == 0)
-class hazard_pointer_domain<size> {
+class hazard_pointer_domain {
    public:
-    hazard_pointer_domain(std::size_t reserve = s_default_memory_amortization) {
+    hazard_pointer_domain() {
         
     }
 
@@ -71,11 +57,7 @@ class hazard_pointer_domain<size> {
     }
 
     void retire(void* data) {
-        retire_node* temp = new retire_node();
-        temp->data = data;
-
-        temp->next = tl_head_retire.load(std::memory_order_acquire);
-        while(!tl_head_retire.compare_exchange_weak(temp->next, temp, std::memory_order_release));
+        tl_retire.push_back(data);
     }
 
 
@@ -92,18 +74,13 @@ class hazard_pointer_domain<size> {
     }
 
     void delete_hazards() {
-        retire_node* current = tl_head_retire.exchange(nullptr, std::memory_order_relaxed);
-
-        while(current != nullptr) {
-
-            [[likely]]
-            if(!scan_for_hazard(current)) {
-                delete current->data;
-            } else {
-                retire(current->data);
+        for(std::size_t i = 0; i < tl_retire.size(); ++i) {
+            if(!scan_for_hazard(tl_retire[i])) {
+                delete tl_retire[i];
+                tl_retire[i] = tl_retire[tl_retire.size() - 1];
+                tl_retire.pop_back();
+                i--;
             }
-
-            current = current->next;
         }
     }
 
@@ -125,12 +102,19 @@ class hazard_pointer_domain<size> {
     }
 
    private:
-    inline static const unsigned int s_default_memory_amortization = std::thread::hardware_concurrency() * 2;
+    template<typename T, typename alloc, typename... args>
+    static std::vector<T, alloc> construct_with_capacity(std::size_t capacity, args&&... arg) {
+        std::vector<T, alloc> vec(std::forward<args>(arg)...);
+        vec.reserve(capacity);
+        return vec;
+    }
 
+   private:
+    inline static
     std::atomic<domain_hazard_node*> m_head_acquire = new domain_hazard_node();
 
-    inline static thread_local std::atomic<retire_node*> tl_head_retire = nullptr;
-
+    inline static thread_local
+     auto tl_retire = construct_with_capacity<void*, cache_aligned_alloc<void*>>(512);
 };
 
 }
