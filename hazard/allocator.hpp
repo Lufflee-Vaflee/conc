@@ -55,7 +55,6 @@ template <class T> class cache_aligned_alloc {
     }
 };
 
-// Think
 template <class T>
 constexpr bool operator==(const cache_aligned_alloc<T> &, const cache_aligned_alloc<T> &) noexcept {
     return true;

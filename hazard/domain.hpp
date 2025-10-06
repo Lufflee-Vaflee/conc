@@ -6,6 +6,7 @@
 #include <vector>
 
 #include <allocator.hpp>
+#include <deque.hpp>
 
 namespace conc {
 
