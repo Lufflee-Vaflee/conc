@@ -4,9 +4,9 @@
 #include <new>
 #include <thread>
 #include <vector>
+#include <array>
 
 #include <allocator.hpp>
-#include <deque.hpp>
 
 namespace conc {
 
@@ -14,76 +14,47 @@ using hazard_pointer_t = std::atomic<void*>;
 
 struct alignas(std::hardware_destructive_interference_size) 
 domain_hazard_cell {
-    domain_hazard_cell* next = nullptr;
-
     std::atomic<std::thread::id> id = std::thread::id();
     std::atomic<void*> pointer;
 };
 
 class hazard_pointer_domain {
    public:
-    hazard_pointer_domain() {
-        
-    }
 
     ~hazard_pointer_domain() {
-        auto temp = m_head_acquire.load(std::memory_order_acquire);
-        while(temp != nullptr) {
-            auto next = temp->next;
-            delete(temp);
-            temp = next;
-        }
-
+        
         return;
     }
 
     hazard_pointer_t& acquire() noexcept {
-        domain_hazard_cell* temp;
-        std::thread::id default_id = std::thread::id();
+        std::thread::id default_id;
 
-        temp->next = m_head_acquire.load(std::memory_order_acquire); 
-        do {
-            temp = temp->next;
+        auto it = m_acquire_list.begin();
+        for(;it != m_acquire_list.end(); ++it) {
+            default_id = std::thread::id();
 
-            [[unlikely]]
-            if(temp == nullptr) {
-                return create_new_node();
+            if(it->id.compare_exchange_strong(
+                default_id,
+                std::this_thread::get_id(),
+                std::memory_order_acq_rel,
+                std::memory_order_relaxed
+            )) {
+                break;
             }
+        }
 
-        } while(!temp->id.compare_exchange_strong(
-            default_id,
-            std::this_thread::get_id(),
-            std::memory_order_release,
-            std::memory_order_relaxed
-        ));
+        if(tl_retire.size() > 128 * 2) {
+            delete_hazards();
+        }
 
-        //delete_hazards
-
-        return temp->pointer;
+        return it->pointer;
     }
 
     void retire(void* data) {
         tl_retire.push_back(data);
     }
 
-
    private:
-    hazard_pointer_t& create_new_node() {
-        domain_hazard_cell* amortized = new domain_hazard_cell();
-        amortized->id = std::this_thread::get_id();
-
-        do {
-            amortized->next = m_head_acquire.load(std::memory_order_acquire);
-        } while(!m_head_acquire.compare_exchange_weak(
-            amortized->next,
-            amortized,
-            std::memory_order_release,
-            std::memory_order_relaxed
-        ));
-
-        return amortized->pointer;
-    }
-
     void delete_hazards() {
         for(std::size_t i = 0; i < tl_retire.size(); ++i) {
             if(!scan_for_hazard(tl_retire[i])) {
@@ -96,17 +67,12 @@ class hazard_pointer_domain {
     }
 
     bool scan_for_hazard(void* pointer) {
-        domain_hazard_cell* current;
-        current->next = m_head_acquire.load(std::memory_order_acquire);
-
-        while(current != nullptr) {
-
+        auto it = m_acquire_list.begin();
+        for(auto it = m_acquire_list.begin();it != m_acquire_list.end(); ++it) {
             [[unlikely]]
-            if(pointer == current->pointer.load(std::memory_order_relaxed)) {
+            if(pointer == it->pointer.load(std::memory_order_relaxed)) {
                 return true;
             }
-
-            current = current->next;
         }
 
         return false;
@@ -122,7 +88,7 @@ class hazard_pointer_domain {
 
    private:
     inline static
-    std::atomic<domain_hazard_cell*> m_head_acquire = new domain_hazard_cell();
+     std::array<domain_hazard_cell, 128> m_acquire_list;
 
     inline static thread_local
      auto tl_retire = construct_with_capacity<void*, cache_aligned_alloc<void*>>(512);
