@@ -16,6 +16,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 add_library(${PROJECT_NAME} INTERFACE)
 
 target_compile_options(${PROJECT_NAME} INTERFACE
+    -Wno-interference-size
 )
 
 target_include_directories( ${PROJECT_NAME}
@@ -56,13 +57,14 @@ target_link_libraries(stack_tests
         pthread
 )
 
-# Add allocator test executable
-add_executable(allocator_tests
+# Add hazard tests executable (includes allocator and deque tests)
+add_executable(hazard_tests
     hazard/test/test_cache_aligned.cpp
+    hazard/test/test_deque.cpp
 )
 
-# Link allocator test executable with Google Test and the library
-target_link_libraries(allocator_tests
+# Link hazard tests executable with Google Test and the library
+target_link_libraries(hazard_tests
     PRIVATE
         ${PROJECT_NAME}
         gtest
@@ -73,4 +75,4 @@ target_link_libraries(allocator_tests
 # Add tests to CTest
 include(GoogleTest)
 gtest_discover_tests(stack_tests)
-gtest_discover_tests(allocator_tests)
+gtest_discover_tests(hazard_tests)

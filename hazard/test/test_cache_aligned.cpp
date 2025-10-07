@@ -4,6 +4,7 @@
 #include <type_traits>
 #include <cstring>
 #include "allocator.hpp"
+#include <domain.hpp>
 #include <deque>
 
 namespace conc::test {
