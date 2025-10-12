@@ -10,23 +10,23 @@
 
 namespace conc {
 
-using hazard_pointer_t = std::atomic<void*>;
-
+template<typename T>
 struct alignas(std::hardware_destructive_interference_size) 
-domain_hazard_cell {
+domain_acquire_cell {
     std::atomic<std::thread::id> id = std::thread::id();
-    std::atomic<void*> pointer;
+    std::atomic<T*> pointer;
 };
 
+template<typename T, std::size_t max_threads = 128>
 class hazard_pointer_domain {
    public:
+    using hazard_pointer_t = std::atomic<T*>;
 
     ~hazard_pointer_domain() {
-        
         return;
     }
 
-    hazard_pointer_t& acquire() noexcept {
+    hazard_pointer_t& acquire() {
         std::thread::id default_id;
 
         auto it = m_acquire_list.begin();
@@ -43,14 +43,20 @@ class hazard_pointer_domain {
             }
         }
 
-        if(tl_retire.size() > 128 * 2) {
+        [[unlikely]]
+        if(it == m_acquire_list.end()) {
+            throw "shit";
+        }
+
+        [[unlikely]]
+        if(tl_retire.size() > max_threads * 2) {
             delete_hazards();
         }
 
         return it->pointer;
     }
 
-    void retire(void* data) {
+    void retire(T* data) {
         tl_retire.push_back(data);
     }
 
@@ -66,7 +72,7 @@ class hazard_pointer_domain {
         }
     }
 
-    bool scan_for_hazard(void* pointer) {
+    bool scan_for_hazard(T* pointer) {
         auto it = m_acquire_list.begin();
         for(auto it = m_acquire_list.begin();it != m_acquire_list.end(); ++it) {
             [[unlikely]]
@@ -79,19 +85,19 @@ class hazard_pointer_domain {
     }
 
    private:
-    template<typename T, typename alloc, typename... args>
-    static std::vector<T, alloc> construct_with_capacity(std::size_t capacity, args&&... arg) {
-        std::vector<T, alloc> vec(std::forward<args>(arg)...);
+    template<typename... args>
+    static std::vector<T*, cache_aligned_alloc<T*>> construct_with_capacity(std::size_t capacity, args&&... arg) {
+        std::vector<T*, cache_aligned_alloc<T*>> vec(std::forward<args>(arg)...);
         vec.reserve(capacity);
         return vec;
     }
 
    private:
     inline static
-     std::array<domain_hazard_cell, 128> m_acquire_list;
+     std::array<domain_acquire_cell<T>, max_threads> m_acquire_list;
 
     inline static thread_local
-     auto tl_retire = construct_with_capacity<void*, cache_aligned_alloc<void*>>(512);
+     auto tl_retire = construct_with_capacity(max_threads * 4);
 };
 
 }
