@@ -1,10 +1,12 @@
 #pragma once
 
 #include <atomic>
+#include <functional>
 #include <new>
-#include <thread>
+#include <type_traits>
 #include <vector>
 #include <array>
+#include <cassert>
 
 #include <allocator.hpp>
 
@@ -12,30 +14,24 @@ namespace conc {
 
 template<typename T>
 struct alignas(std::hardware_destructive_interference_size) 
-domain_acquire_cell {
-    std::atomic<std::thread::id> id = std::thread::id();
+domain_cell {
     std::atomic<T*> pointer;
 };
 
-template<typename T, std::size_t max_threads = 128>
-class hazard_pointer_domain {
+template<typename T, std::size_t max_objects = 128, auto placeholder = std::placeholders::_1>
+requires(std::is_nothrow_destructible_v<T>)
+class hazard_domain {
    public:
-    using hazard_pointer_t = std::atomic<T*>;
-
-    ~hazard_pointer_domain() {
-        return;
-    }
-
-    hazard_pointer_t& acquire() {
-        std::thread::id default_id;
+    domain_cell<T>* capture_cell() noexcept {
+        T* null;
 
         auto it = m_acquire_list.begin();
         for(;it != m_acquire_list.end(); ++it) {
-            default_id = std::thread::id();
+            null = nullptr;
 
-            if(it->id.compare_exchange_strong(
-                default_id,
-                std::this_thread::get_id(),
+            if(it->pointer.compare_exchange_strong(
+                null,
+                SENTINEL,
                 std::memory_order_acq_rel,
                 std::memory_order_relaxed
             )) {
@@ -43,25 +39,21 @@ class hazard_pointer_domain {
             }
         }
 
-        [[unlikely]]
-        if(it == m_acquire_list.end()) {
-            throw "shit";
-        }
+        assert(it != m_acquire_list.end());
 
         [[unlikely]]
-        if(tl_retire.size() > max_threads * 2) {
+        if(tl_retire.size() > max_objects * 2) {
             delete_hazards();
         }
 
-        return it->pointer;
+        return &(*it);
     }
 
     void retire(T* data) {
-        tl_retire.push_back(data);
+        /*thread_local*/ tl_retire.push_back(data);
     }
 
-   private:
-    void delete_hazards() {
+    void delete_hazards() noexcept {
         for(std::size_t i = 0; i < tl_retire.size(); ++i) {
             if(!scan_for_hazard(tl_retire[i])) {
                 delete tl_retire[i];
@@ -72,9 +64,10 @@ class hazard_pointer_domain {
         }
     }
 
-    bool scan_for_hazard(T* pointer) {
+   private:
+    bool scan_for_hazard(T* pointer) noexcept {
         auto it = m_acquire_list.begin();
-        for(auto it = m_acquire_list.begin();it != m_acquire_list.end(); ++it) {
+        for(auto it = m_acquire_list.begin(); it != m_acquire_list.end(); ++it) {
             [[unlikely]]
             if(pointer == it->pointer.load(std::memory_order_relaxed)) {
                 return true;
@@ -94,10 +87,18 @@ class hazard_pointer_domain {
 
    private:
     inline static
-     std::array<domain_acquire_cell<T>, max_threads> m_acquire_list;
+     std::array<domain_cell<T>, max_objects> m_acquire_list;
 
     inline static thread_local
-     auto tl_retire = construct_with_capacity(max_threads * 4);
+     auto tl_retire = construct_with_capacity(max_objects * 4);
+
+    // placeholder value to a aligned storage to mark cell that is captured and yet to be used
+    // could use reinterpreted cast to domain address, but made for compiler/standard grooming
+    alignas(T) inline static 
+     char sentinel_storage[sizeof(T)];
+
+    inline static 
+     T* const SENTINEL = reinterpret_cast<T*>(&sentinel_storage);
 };
 
 }

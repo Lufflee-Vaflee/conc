@@ -1,7 +1,6 @@
 #include <gtest/gtest.h>
 #include <thread>
 #include <vector>
-#include <memory>
 #include <atomic>
 #include <chrono>
 #include <set>
@@ -28,48 +27,48 @@ protected:
     }
 };
 
-// Test basic acquire functionality
+// Test basic capture_cell functionality
 TEST_F(HazardPointerDomainTest, BasicAcquire) {
-    hazard_pointer_domain<TestNode> domain;
+    hazard_domain<TestNode> domain;
     
-    // Should be able to acquire a hazard pointer
-    auto& hp = domain.acquire();
+    // Should be able to capture a cell
+    auto cell = domain.capture_cell();
     
     // Should not be null pointer
-    EXPECT_NO_THROW(hp.store(nullptr));
-    EXPECT_EQ(hp.load(), nullptr);
+    EXPECT_NO_THROW(cell->pointer.store(nullptr));
+    EXPECT_EQ(cell->pointer.load(), nullptr);
 }
 
-// Test multiple acquire calls from same thread
+// Test multiple capture_cell calls from same thread
 TEST_F(HazardPointerDomainTest, MultipleAcquireFromSameThread) {
-    hazard_pointer_domain<TestNode> domain;
+    hazard_domain<TestNode> domain;
     
-    // First acquire should succeed
-    auto& hp1 = domain.acquire();
-    hp1.store(nullptr);
+    // First capture should succeed
+    auto cell1 = domain.capture_cell();
+    cell1->pointer.store(nullptr);
     
-    // Second acquire should also succeed (different slot)
-    auto& hp2 = domain.acquire();
-    hp2.store(nullptr);
+    // Second capture should also succeed (different slot)
+    auto cell2 = domain.capture_cell();
+    cell2->pointer.store(nullptr);
     
     // They should be different objects
-    EXPECT_NE(&hp1, &hp2);
+    EXPECT_NE(cell1, cell2);
 }
 
-// Test acquire from multiple threads
+// Test capture_cell from multiple threads
 TEST_F(HazardPointerDomainTest, MultiThreadAcquire) {
-    hazard_pointer_domain<TestNode, 4> domain; // Small limit for testing
+    hazard_domain<TestNode, 4> domain; // Small limit for testing
     constexpr int num_threads = 4;
     std::vector<std::thread> threads;
-    std::vector<typename hazard_pointer_domain<TestNode>::hazard_pointer_t*> acquired_ptrs(num_threads);
+    std::vector<domain_cell<TestNode>*> acquired_ptrs(num_threads);
     std::atomic<int> success_count{0};
     
     for (int i = 0; i < num_threads; ++i) {
         threads.emplace_back([&domain, &acquired_ptrs, &success_count, i]() {
             try {
-                auto& hp = domain.acquire();
-                acquired_ptrs[i] = &hp;
-                hp.store(reinterpret_cast<TestNode*>(i + 1)); // Store unique value
+                auto cell = domain.capture_cell();
+                acquired_ptrs[i] = cell;
+                cell->pointer.store(reinterpret_cast<TestNode*>(i + 1)); // Store unique value
                 success_count++;
                 
                 // Hold for a bit to ensure concurrent access
@@ -87,7 +86,7 @@ TEST_F(HazardPointerDomainTest, MultiThreadAcquire) {
     EXPECT_EQ(success_count.load(), num_threads);
     
     // Verify all acquired pointers are unique
-    std::set<typename hazard_pointer_domain<TestNode>::hazard_pointer_t*> unique_ptrs;
+    std::set<domain_cell<TestNode>*> unique_ptrs;
     for (auto* ptr : acquired_ptrs) {
         if (ptr != nullptr) {
             unique_ptrs.insert(ptr);
@@ -98,7 +97,7 @@ TEST_F(HazardPointerDomainTest, MultiThreadAcquire) {
 
 // Test retire functionality
 TEST_F(HazardPointerDomainTest, BasicRetire) {
-    hazard_pointer_domain<TestNode> domain;
+    hazard_domain<TestNode> domain;
     
     // Create a test node
     TestNode* node = new TestNode(42);
@@ -112,14 +111,14 @@ TEST_F(HazardPointerDomainTest, BasicRetire) {
 
 // Test protection mechanism - node should not be deleted while protected
 TEST_F(HazardPointerDomainTest, ProtectionMechanism) {
-    hazard_pointer_domain<TestNode> domain;
+    hazard_domain<TestNode> domain;
     
     // Create a test node
     TestNode* node = new TestNode(99);
     
-    // Acquire hazard pointer and protect the node
-    auto& hp = domain.acquire();
-    hp.store(node);
+    // Capture cell and protect the node
+    auto cell = domain.capture_cell();
+    cell->pointer.store(node);
     
     // Retire the node
     domain.retire(node);
@@ -135,7 +134,7 @@ TEST_F(HazardPointerDomainTest, ProtectionMechanism) {
     EXPECT_EQ(node->value.load(), 99);
     
     // Clear the hazard pointer
-    hp.store(nullptr);
+    cell->pointer.store(nullptr);
     
     // Clean up - the node might be deleted in the next cleanup cycle
     // We can't reliably test deletion without exposing internals,
@@ -144,7 +143,7 @@ TEST_F(HazardPointerDomainTest, ProtectionMechanism) {
 
 // Test concurrent retire operations
 TEST_F(HazardPointerDomainTest, ConcurrentRetire) {
-    hazard_pointer_domain<TestNode> domain;
+    hazard_domain<TestNode> domain;
     constexpr int num_threads = 8;
     constexpr int nodes_per_thread = 50;
     std::vector<std::thread> threads;
@@ -166,69 +165,39 @@ TEST_F(HazardPointerDomainTest, ConcurrentRetire) {
     SUCCEED();
 }
 
-// Test acquire limit enforcement
-TEST_F(HazardPointerDomainTest, AcquireLimitEnforcement) {
-    hazard_pointer_domain<TestNode, 2> domain; // Very small limit
-    
-    // Create threads that will try to acquire more hazard pointers than available
-    std::atomic<int> exception_count{0};
-    std::vector<std::thread> threads;
-    constexpr int num_threads = 5; // More than the limit of 2
-    
-    for (int i = 0; i < num_threads; ++i) {
-        threads.emplace_back([&domain, &exception_count]() {
-            try {
-                auto& hp = domain.acquire();
-                hp.store(nullptr);
-                std::this_thread::sleep_for(std::chrono::milliseconds(100));
-            } catch (...) {
-                exception_count++;
-            }
-        });
-    }
-    
-    for (auto& t : threads) {
-        t.join();
-    }
-    
-    // Some threads should have thrown exceptions due to limit
-    EXPECT_GT(exception_count.load(), 0);
-    EXPECT_LE(exception_count.load(), num_threads);
-}
-
-// Test hazard pointer reuse after thread exit
+// Test domain cell reuse after thread exit
 TEST_F(HazardPointerDomainTest, HazardPointerReuse) {
-    hazard_pointer_domain<TestNode> domain;
-    typename hazard_pointer_domain<TestNode>::hazard_pointer_t* first_hp = nullptr;
+    hazard_domain<TestNode> domain;
+    domain_cell<TestNode>* first_cell = nullptr;
     
-    // Acquire in a thread, then let thread exit
-    std::thread t1([&domain, &first_hp]() {
-        auto& hp = domain.acquire();
-        first_hp = &hp;
-        hp.store(reinterpret_cast<TestNode*>(0x12345));
+    // Capture in a thread, then let thread exit
+    std::thread t1([&domain, &first_cell]() {
+        auto cell = domain.capture_cell();
+        first_cell = cell;
+        cell->pointer.store(reinterpret_cast<TestNode*>(0x12345));
     });
     t1.join();
     
     // Give some time for cleanup
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
     
-    // Now acquire from a new thread - should be able to reuse the slot
-    typename hazard_pointer_domain<TestNode>::hazard_pointer_t* second_hp = nullptr;
-    std::thread t2([&domain, &second_hp]() {
-        auto& hp = domain.acquire();
-        second_hp = &hp;
-        hp.store(reinterpret_cast<TestNode*>(0x54321));
+    // Now capture from a new thread - should be able to reuse the slot
+    domain_cell<TestNode>* second_cell = nullptr;
+    std::thread t2([&domain, &second_cell]() {
+        auto cell = domain.capture_cell();
+        second_cell = cell;
+        cell->pointer.store(reinterpret_cast<TestNode*>(0x54321));
     });
     t2.join();
     
-    // The hazard pointers might be the same object (reused slot)
+    // The domain cells might be the same object (reused slot)
     // but this depends on implementation details
-    EXPECT_NE(second_hp, nullptr);
+    EXPECT_NE(second_cell, nullptr);
 }
 
 // Test thread-local retire list behavior
 TEST_F(HazardPointerDomainTest, ThreadLocalRetireList) {
-    hazard_pointer_domain<TestNode, 4> domain;
+    hazard_domain<TestNode, 4> domain;
     std::atomic<int> total_retires{0};
     
     // Multiple threads retiring different numbers of objects
@@ -253,7 +222,7 @@ TEST_F(HazardPointerDomainTest, ThreadLocalRetireList) {
 
 // Test cleanup trigger threshold
 TEST_F(HazardPointerDomainTest, CleanupTriggerThreshold) {
-    hazard_pointer_domain<TestNode, 4> domain; // max_threads = 4, threshold = 8
+    hazard_domain<TestNode, 4> domain; // max_threads = 4, threshold = 8
     
     // Retire exactly enough to trigger cleanup (more than max_threads * 2)
     for (int i = 0; i < 10; ++i) {
@@ -267,7 +236,7 @@ TEST_F(HazardPointerDomainTest, CleanupTriggerThreshold) {
 
 // Stress test with many concurrent operations
 TEST_F(HazardPointerDomainTest, StressTest) {
-    hazard_pointer_domain<TestNode, 16> domain;
+    hazard_domain<TestNode, 16> domain;
     constexpr int num_threads = 8;
     constexpr int operations_per_thread = 100;
     std::atomic<int> completed_operations{0};
@@ -276,20 +245,20 @@ TEST_F(HazardPointerDomainTest, StressTest) {
     for (int i = 0; i < num_threads; ++i) {
         threads.emplace_back([&domain, &completed_operations, i, operations_per_thread]() {
             try {
-                // Acquire hazard pointer
-                auto& hp = domain.acquire();
+                // Capture domain cell
+                auto cell = domain.capture_cell();
                 
                 for (int j = 0; j < operations_per_thread; ++j) {
                     // Create and protect a node
                     TestNode* node = new TestNode(i * operations_per_thread + j);
-                    hp.store(node);
+                    cell->pointer.store(node);
                     
                     // Do some work with the node
                     node->value.store(j);
                     EXPECT_EQ(node->value.load(), j);
                     
                     // Clear protection and retire
-                    hp.store(nullptr);
+                    cell->pointer.store(nullptr);
                     domain.retire(node);
                     
                     completed_operations++;
@@ -310,7 +279,7 @@ TEST_F(HazardPointerDomainTest, StressTest) {
 
 // Test edge case: retire nullptr
 TEST_F(HazardPointerDomainTest, RetireNullptr) {
-    hazard_pointer_domain<TestNode> domain;
+    hazard_domain<TestNode> domain;
     
     // Retiring nullptr should not crash
     EXPECT_NO_THROW(domain.retire(nullptr));
@@ -318,21 +287,21 @@ TEST_F(HazardPointerDomainTest, RetireNullptr) {
 
 // Test edge case: multiple acquires and retires in sequence
 TEST_F(HazardPointerDomainTest, SequentialOperations) {
-    hazard_pointer_domain<TestNode> domain;
+    hazard_domain<TestNode> domain;
     
     for (int i = 0; i < 50; ++i) {
-        // Acquire
-        auto& hp = domain.acquire();
+        // Capture cell
+        auto cell = domain.capture_cell();
         
         // Create and protect node
         TestNode* node = new TestNode(i);
-        hp.store(node);
+        cell->pointer.store(node);
         
         // Verify node is accessible
         EXPECT_EQ(node->value.load(), i);
         
         // Clear protection and retire
-        hp.store(nullptr);
+        cell->pointer.store(nullptr);
         domain.retire(node);
     }
     
