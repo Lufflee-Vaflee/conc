@@ -56,6 +56,7 @@ add_executable(hazard_tests
     hazard/test/test_cache_aligned.cpp
     hazard/test/test_domain.cpp
     hazard/test/test_hazard_pointer.cpp
+    hazard/test/stress_test_hazard_pointer.cpp
 )
 
 # Link hazard tests executable with Google Test and the library

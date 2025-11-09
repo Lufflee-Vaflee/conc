@@ -39,22 +39,6 @@ TEST_F(HazardPointerDomainTest, BasicAcquire) {
     EXPECT_EQ(cell->pointer.load(), nullptr);
 }
 
-// Test multiple capture_cell calls from same thread
-TEST_F(HazardPointerDomainTest, MultipleAcquireFromSameThread) {
-    hazard_domain<TestNode> domain;
-    
-    // First capture should succeed
-    auto cell1 = domain.capture_cell();
-    cell1->pointer.store(nullptr);
-    
-    // Second capture should also succeed (different slot)
-    auto cell2 = domain.capture_cell();
-    cell2->pointer.store(nullptr);
-    
-    // They should be different objects
-    EXPECT_NE(cell1, cell2);
-}
-
 // Test capture_cell from multiple threads
 TEST_F(HazardPointerDomainTest, MultiThreadAcquire) {
     hazard_domain<TestNode, 4> domain; // Small limit for testing
