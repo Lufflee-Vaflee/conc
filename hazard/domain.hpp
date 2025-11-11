@@ -50,7 +50,7 @@ class hazard_domain {
     }
 
     void retire(T* data) {
-        /*thread_local*/ tl_retire.push_back(data);
+        /*thread_local*/ tl_retire.emplace_back(data);
     }
 
     void delete_hazards() noexcept {

@@ -11,11 +11,12 @@ add_library(${PROJECT_NAME} INTERFACE)
 
 target_compile_options(${PROJECT_NAME} INTERFACE
     -Wno-interference-size
+    -fstrict-aliasing
 )
 
-target_include_directories( ${PROJECT_NAME}
+target_include_directories(${PROJECT_NAME}
     INTERFACE
-        "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/stack/include>"
+        "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/containers>"
         "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/hazard>"
         "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
 )
@@ -38,12 +39,12 @@ FetchContent_MakeAvailable(googletest)
 enable_testing()
 
 # Add test executable for stack
-add_executable(stack_tests
-    stack/test/test_stack.cpp
+add_executable(containers_tests
+    containers/test/test_stack.cpp
 )
 
 # Link test executable with Google Test and the stack library
-target_link_libraries(stack_tests
+target_link_libraries(containers_tests
     PRIVATE
         ${PROJECT_NAME}
         gtest
@@ -70,5 +71,5 @@ target_link_libraries(hazard_tests
 
 # Add tests to CTest
 include(GoogleTest)
-gtest_discover_tests(stack_tests)
+gtest_discover_tests(containers_tests)
 gtest_discover_tests(hazard_tests)

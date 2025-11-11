@@ -15,7 +15,7 @@ class hazard_pointer {
     }
 
    public:
-    static hazard_pointer<T, domain> make_hazard_pointer() {
+    static hazard_pointer<T, domain> make_hazard_pointer() noexcept {
         return hazard_pointer<T, domain>(s_domain.capture_cell());
     }
 
