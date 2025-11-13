@@ -23,6 +23,25 @@ class hazard_pointer {
         s_domain.retire(data);
     }
 
+    struct guard {
+        guard() = delete;
+        guard(const guard&) = delete;
+        guard(guard&&) = delete;
+        guard& operator=(const guard&) = delete;
+        guard& operator=(guard&&) = delete;
+
+        guard(T&& hz_obj) noexcept :
+            hazard_obj_ptr(std::addressof(hz_obj)) {}
+        guard(T* hz_obj) noexcept :
+            hazard_obj_ptr(hz_obj) {}
+        ~guard() {
+            hazard_pointer::retire(hazard_obj_ptr);
+        }
+
+       private:
+        T* hazard_obj_ptr = nullptr;
+    };
+
    public:
     hazard_pointer() noexcept = default;
 

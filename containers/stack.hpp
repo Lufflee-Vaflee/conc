@@ -4,14 +4,16 @@
 #include <atomic>
 #include <optional>
 #include <hazard_pointer.hpp>
+#include <type_traits>
 
 namespace conc {
 
 template<typename T>
+requires(std::is_move_constructible_v<T> && std::is_nothrow_destructible_v<T>)
 class stack {
    private:
     struct node {
-        T element = nullptr;
+        T element;
         node* previous = nullptr;
     };
 
@@ -52,7 +54,7 @@ class stack {
         return;
     }
 
-    std::optional<T> pop() {
+    std::optional<T> pop() noexcept(std::is_nothrow_move_constructible_v<T>) {
         using hazard_ptr_t = hazard_pointer<node, hazard_domain>;
         hazard_ptr_t hp = hazard_ptr_t::make_hazard_pointer();
 

@@ -41,6 +41,7 @@ enable_testing()
 # Add test executable for stack
 add_executable(containers_tests
     containers/test/test_stack.cpp
+    containers/test/test_queue.cpp
 )
 
 # Link test executable with Google Test and the stack library
