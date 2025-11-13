@@ -56,6 +56,7 @@ class stack {
 
     std::optional<T> pop() noexcept(std::is_nothrow_move_constructible_v<T>) {
         using hazard_ptr_t = hazard_pointer<node, hazard_domain>;
+        using guard_t = hazard_ptr_t::guard;
         hazard_ptr_t hp = hazard_ptr_t::make_hazard_pointer();
 
         node* acquire;
@@ -69,9 +70,8 @@ class stack {
 
         } while(!m_head.compare_exchange_weak(acquire, acquire->previous, std::memory_order_release));
 
+        auto guard = guard_t(acquire);
         T result = std::move(acquire->element);
-
-        hazard_ptr_t::retire(acquire);
 
         return result;
     }

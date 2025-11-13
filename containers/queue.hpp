@@ -12,7 +12,7 @@ class queue {
    private:
     struct node {
         int* element = nullptr;
-        std::atomic<node*> next = nullptr;
+        std::atomic<node*> prev = nullptr;
     };
 
    public:
@@ -27,31 +27,29 @@ class queue {
             nullptr
         };
 
+        auto head = m_head.load(std::memory_order_acquire);
         do {
-            auto head = m_head.load();
+            to_push->prev.store(head, std::memory_order_relaxed);
+        } while(!m_head.compare_exchange_weak(head, to_push, std::memory_order_release));
 
-            auto next = head->next.load();
-            if(next != nullptr) {
-                continue;
-            }
+        if(head == SENTINEL) {
+            m_tail.compare_exchange_strong(head, to_push);
+        }
 
-            if(head->next.compare_exchange_strong(next, to_push)) {
-                auto old = m_head.exchange(to_push);
-                assert(head == old);
-                return;
-            }
-
-        } while(true);
+        return;
     }
 
     std::optional<int> pop() {
-        auto tail = SENTINEL->next.load();
-        if(tail == nullptr) {
-            return {};
-        }
+        auto tail = m_tail.load();
 
-        auto next_tail = tail->next.load();
-        SENTINEL->next = 
+        do {
+            if(tail == SENTINEL) {
+                return std::nullopt;
+            }
+        } while(m_tail.compare)
+
+        
+
     }
 
    private:

@@ -30,12 +30,10 @@ class hazard_pointer {
         guard& operator=(const guard&) = delete;
         guard& operator=(guard&&) = delete;
 
-        guard(T&& hz_obj) noexcept :
-            hazard_obj_ptr(std::addressof(hz_obj)) {}
         guard(T* hz_obj) noexcept :
             hazard_obj_ptr(hz_obj) {}
         ~guard() {
-            hazard_pointer::retire(hazard_obj_ptr);
+            retire(hazard_obj_ptr);
         }
 
        private:
@@ -77,7 +75,9 @@ class hazard_pointer {
         assert(this->m_cell != nullptr);
         auto old = ptr;
         reset_protection(old);
+
         ptr = src.load(std::memory_order_acquire);
+
         auto result = (old == ptr);
         if(!result) {
             reset_protection();
