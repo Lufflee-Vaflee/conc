@@ -18,18 +18,13 @@ class stack {
     };
 
    public:
-    using hazard_domain = conc::hazard_domain<node, 16>;
+    using hazard_domain = conc::hazard_domain<node, 16, stack<T>>;
 
     stack() = default;
     stack(stack const&) = delete;
+    stack(stack&& other) = delete;
     stack& operator=(stack const&) = delete;
     stack& operator=(stack &&) = delete;
-
-    //could be accesed concurrently, no wait-free guarantee
-    stack(stack&& other) {
-        m_head.store(other.m_head.exchange(nullptr, std::memory_order_acquire), std::memory_order_relaxed);
-    }
-
 
     ~stack() {
         //preconditions: no threads perform concurrent acsess
@@ -70,8 +65,8 @@ class stack {
 
         } while(!m_head.compare_exchange_weak(acquire, acquire->previous, std::memory_order_release));
 
-        auto guard = guard_t(acquire);
         T result = std::move(acquire->element);
+        hazard_ptr_t::retire(acquire);
 
         return result;
     }

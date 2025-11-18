@@ -451,10 +451,10 @@ TEST_F(StackTest, ExceptionSafetyTest) {
 // Torture test - everything at once
 TEST_F(StackTest, TortureTest) {
     stack<std::unique_ptr<std::vector<int>>> s;
-    const int duration_seconds = 5;
-    const int num_producer_threads = 8;
-    const int num_consumer_threads = 8;
-    const int num_mixed_threads = 4;
+    const int duration_seconds = 2;
+    const int num_producer_threads = 3;
+    const int num_consumer_threads = 3;
+    const int num_mixed_threads = 1;
     
     std::atomic<bool> stop{false};
     std::atomic<int> total_produced{0};

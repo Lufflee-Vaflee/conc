@@ -141,18 +141,11 @@ TEST_F(HazardPointerStressTest, HighContentionDefaultDomain) {
                     // 20% chance: pointer replacement (increased from 10%)
                     auto old_ptr = shared_pointers[ptr_idx].load();
                     if (old_ptr && (i % 10 == 0)) { // Much more frequent retirement
-                        auto new_node = std::make_unique<StressTestNode>(i * 1000 + t);
-                        auto* new_ptr = new_node.get();
+                        auto new_ptr = new StressTestNode(i * 1000 + t);
                         
                         if (shared_pointers[ptr_idx].compare_exchange_strong(old_ptr, new_ptr)) {
                             hazard_pointer<StressTestNode>::retire(old_ptr);
                             total_retirements.fetch_add(1);
-                            
-                            // Keep the new node alive with thread-safe access
-                            {
-                                std::lock_guard<std::mutex> lock(node_pool_mutex);
-                                dynamic_nodes.push_back(std::move(new_node));
-                            }
                         }
                     }
                 }

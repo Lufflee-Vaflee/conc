@@ -74,6 +74,7 @@ TEST_F(HazardPointerDomainTest, MultiThreadAcquire) {
     for (auto* ptr : acquired_ptrs) {
         if (ptr != nullptr) {
             unique_ptrs.insert(ptr);
+            ptr->pointer.store(nullptr);
         }
     }
     EXPECT_EQ(unique_ptrs.size(), num_threads);

@@ -1,7 +1,6 @@
 #pragma once
 
 #include <atomic>
-#include <functional>
 #include <new>
 #include <type_traits>
 #include <vector>
@@ -18,7 +17,9 @@ domain_cell {
     std::atomic<T*> pointer;
 };
 
-template<typename T, std::size_t max_objects = 128, auto placeholder = std::placeholders::_1>
+struct default_placeholder {};
+
+template<typename T, std::size_t max_objects = 128, typename placeholder = default_placeholder>
 requires(std::is_nothrow_destructible_v<T>)
 class hazard_domain {
    public:
@@ -31,9 +32,7 @@ class hazard_domain {
 
             if(it->pointer.compare_exchange_strong(
                 null,
-                SENTINEL,
-                std::memory_order_acq_rel,
-                std::memory_order_relaxed
+                SENTINEL
             )) {
                 break;
             }
@@ -41,15 +40,15 @@ class hazard_domain {
 
         assert(it != m_acquire_list.end());
 
-        [[unlikely]]
-        if(tl_retire.size() > max_objects * 2) {
-            delete_hazards();
-        }
 
         return &(*it);
     }
 
     void retire(T* data) {
+        if(tl_retire.size() > max_objects * 2) {
+            delete_hazards();
+        }
+
         /*thread_local*/ tl_retire.emplace_back(data);
     }
 
@@ -66,10 +65,9 @@ class hazard_domain {
 
    private:
     bool scan_for_hazard(T* pointer) noexcept {
-        auto it = m_acquire_list.begin();
         for(auto it = m_acquire_list.begin(); it != m_acquire_list.end(); ++it) {
             [[unlikely]]
-            if(pointer == it->pointer.load(std::memory_order_relaxed)) {
+            if(pointer == it->pointer.load()) {
                 return true;
             }
         }
@@ -78,19 +76,11 @@ class hazard_domain {
     }
 
    private:
-    template<typename... args>
-    static std::vector<T*, cache_aligned_alloc<T*>> construct_with_capacity(std::size_t capacity, args&&... arg) {
-        std::vector<T*, cache_aligned_alloc<T*>> vec(std::forward<args>(arg)...);
-        vec.reserve(capacity);
-        return vec;
-    }
-
-   private:
     inline static
      std::array<domain_cell<T>, max_objects> m_acquire_list;
 
     inline static thread_local
-     auto tl_retire = construct_with_capacity(max_objects * 4);
+     std::vector<T*> tl_retire;
 
     // placeholder value to a aligned storage to mark cell that is captured and yet to be used
     // could use reinterpreted cast to domain address, but made for compiler/standard grooming

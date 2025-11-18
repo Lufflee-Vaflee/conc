@@ -8,9 +8,10 @@ template<typename T>
 using default_domain = hazard_domain<T>;
 
 template <typename T, typename domain = default_domain<T>>
+requires(std::is_nothrow_destructible_v<T>)
 class hazard_pointer {
    private:
-    hazard_pointer(domain_cell<T>* cell) {
+    hazard_pointer(domain_cell<T>* cell) noexcept {
         this->m_cell = cell;
     }
 
@@ -30,14 +31,17 @@ class hazard_pointer {
         guard& operator=(const guard&) = delete;
         guard& operator=(guard&&) = delete;
 
-        guard(T* hz_obj) noexcept :
-            hazard_obj_ptr(hz_obj) {}
+        guard(T*& hz_obj) noexcept :
+            hazard_obj_ptr(std::addressof(hz_obj)) {}
         ~guard() {
-            retire(hazard_obj_ptr);
+            [[likely]]
+            if(*hazard_obj_ptr != nullptr) {
+                retire(*hazard_obj_ptr);
+            }
         }
 
        private:
-        T* hazard_obj_ptr = nullptr;
+        T** hazard_obj_ptr = nullptr;
     };
 
    public:
