@@ -16,7 +16,8 @@ protected:
     }
 
     void TearDown() override {
-        // Cleanup code for each test
+        // Cleanup hazard domains after each test to avoid false positives with sanitizers
+        queue<int>::hazard_domain{}.delete_all();
     }
 };
 

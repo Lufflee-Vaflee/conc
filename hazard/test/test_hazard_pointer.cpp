@@ -1,4 +1,5 @@
 #include "hazard_pointer.hpp"
+#include "domain.hpp"
 
 #include <gtest/gtest.h>
 #include <atomic>
@@ -29,6 +30,9 @@ protected:
     }
     
     void TearDown() override {
+        // Cleanup hazard domain after each test to avoid false positives with sanitizers
+        hazard_domain<TestNode>{}.delete_all();
+        
         // Clean up any remaining nodes
         auto ptr = atomic_ptr.load();
         if (ptr) {

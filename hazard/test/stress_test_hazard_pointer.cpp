@@ -1,4 +1,5 @@
 #include "hazard_pointer.hpp"
+#include "domain.hpp"
 
 #include <gtest/gtest.h>
 #include <atomic>
@@ -59,6 +60,13 @@ protected:
     }
     
     void TearDown() override {
+        // Cleanup hazard domains after each test to avoid false positives with sanitizers
+        hazard_domain<StressTestNode>{}.delete_all();                    // Default domain
+        small_domain<StressTestNode>{}.delete_all();                      // 32 max_objects
+        medium_domain<StressTestNode>{}.delete_all();                     // 64 max_objects
+        large_domain<StressTestNode>{}.delete_all();                      // 256 max_objects
+        huge_domain<StressTestNode>{}.delete_all();                       // 1024 max_objects
+        
         node_pool.clear();
     }
     

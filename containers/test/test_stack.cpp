@@ -9,6 +9,40 @@
 
 using namespace conc;
 
+// Forward declaration for ThrowingInt used in tests
+class ThrowingInt {
+public:
+    int value;
+    static std::atomic<int> copy_count;
+    
+    ThrowingInt(int v) : value(v) {}
+    
+    ThrowingInt(const ThrowingInt& other) : value(other.value) {
+        int count = copy_count.fetch_add(1);
+        if (count % 100 == 99) {  // Throw on every 100th copy
+            throw std::runtime_error("Copy constructor exception");
+        }
+    }
+    
+    ThrowingInt(ThrowingInt&& other) noexcept : value(other.value) {}
+    
+    ThrowingInt& operator=(const ThrowingInt& other) {
+        value = other.value;
+        return *this;
+    }
+    
+    ThrowingInt& operator=(ThrowingInt&& other) noexcept {
+        value = other.value;
+        return *this;
+    }
+    
+    bool operator==(const ThrowingInt& other) const {
+        return value == other.value;
+    }
+};
+
+std::atomic<int> ThrowingInt::copy_count{0};
+
 class StackTest : public ::testing::Test {
 protected:
     void SetUp() override {
@@ -16,7 +50,12 @@ protected:
     }
 
     void TearDown() override {
-        // Cleanup code for each test
+        // Cleanup hazard domains after each test to avoid false positives with sanitizers
+        stack<int>::hazard_domain{}.delete_all();
+        stack<std::unique_ptr<int>>::hazard_domain{}.delete_all();
+        stack<std::unique_ptr<std::vector<int>>>::hazard_domain{}.delete_all();
+        stack<std::shared_ptr<std::vector<int>>>::hazard_domain{}.delete_all();
+        stack<ThrowingInt>::hazard_domain{}.delete_all();
     }
 };
 
@@ -377,39 +416,7 @@ TEST_F(StackTest, HighContentionWithContextSwitches) {
     EXPECT_GT(successful_ops.load(), 0);
 }
 
-// Test with exception-throwing elements
-class ThrowingInt {
-public:
-    int value;
-    static std::atomic<int> copy_count;
-    
-    ThrowingInt(int v) : value(v) {}
-    
-    ThrowingInt(const ThrowingInt& other) : value(other.value) {
-        int count = copy_count.fetch_add(1);
-        if (count % 100 == 99) {  // Throw on every 100th copy
-            throw std::runtime_error("Copy constructor exception");
-        }
-    }
-    
-    ThrowingInt(ThrowingInt&& other) noexcept : value(other.value) {}
-    
-    ThrowingInt& operator=(const ThrowingInt& other) {
-        value = other.value;
-        return *this;
-    }
-    
-    ThrowingInt& operator=(ThrowingInt&& other) noexcept {
-        value = other.value;
-        return *this;
-    }
-    
-    bool operator==(const ThrowingInt& other) const {
-        return value == other.value;
-    }
-};
-
-std::atomic<int> ThrowingInt::copy_count{0};
+// Test with exception-throwing elements (ThrowingInt defined at top of file)
 
 TEST_F(StackTest, ExceptionSafetyTest) {
     stack<ThrowingInt> s;

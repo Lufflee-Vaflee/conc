@@ -40,15 +40,14 @@ class hazard_domain {
 
         assert(it != m_acquire_list.end());
 
+        if(tl_retire.size() > max_objects * 2) {
+            delete_hazards();
+        }
 
         return &(*it);
     }
 
     void retire(T* data) {
-        if(tl_retire.size() > max_objects * 2) {
-            delete_hazards();
-        }
-
         /*thread_local*/ tl_retire.emplace_back(data);
     }
 
@@ -63,8 +62,17 @@ class hazard_domain {
         }
     }
 
+    //for testing purposes
+    void delete_all() {
+        for(std::size_t i = 0; i < max_objects; ++i) {
+            m_acquire_list[i].pointer.store(nullptr);
+        }
+
+        delete_hazards();
+    }
+
    private:
-    bool scan_for_hazard(T* pointer) noexcept {
+    bool __attribute__((noinline)) scan_for_hazard(T* pointer) noexcept {
         for(auto it = m_acquire_list.begin(); it != m_acquire_list.end(); ++it) {
             [[unlikely]]
             if(pointer == it->pointer.load()) {

@@ -20,6 +20,9 @@ protected:
     }
 
     void TearDown() override {
+        // Cleanup hazard domains after each test to avoid false positives with sanitizers
+        stack<int>::hazard_domain{}.delete_all();
+        
         // Reset pool for next test
         for (int i = 0; i < POOL_SIZE; ++i) {
             memory_pool[i] = i;

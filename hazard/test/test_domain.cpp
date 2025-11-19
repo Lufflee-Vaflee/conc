@@ -23,7 +23,9 @@ protected:
     }
     
     void TearDown() override {
-        // Cleanup any test data
+        // Cleanup hazard domain after each test to avoid false positives with sanitizers
+        hazard_domain<TestNode>{}.delete_all();
+        hazard_domain<TestNode, 4>{}.delete_all(); // For tests with specific limits
     }
 };
 

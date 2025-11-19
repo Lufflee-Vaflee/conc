@@ -6,8 +6,16 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# Optional ThreadSanitizer support
+# Optional sanitizer support
 option(ENABLE_TSAN "Enable ThreadSanitizer (TSan) for detecting data races" OFF)
+option(ENABLE_ASAN "Enable AddressSanitizer (ASan) for detecting memory errors" OFF)
+option(ENABLE_LSAN "Enable LeakSanitizer (LSan) for detecting memory leaks" OFF)
+
+# Validate sanitizer combinations (TSan is incompatible with ASan/LSan)
+if(ENABLE_TSAN AND (ENABLE_ASAN OR ENABLE_LSAN))
+    message(FATAL_ERROR "ThreadSanitizer is incompatible with AddressSanitizer/LeakSanitizer")
+endif()
+
 if(ENABLE_TSAN)
     message(STATUS "ThreadSanitizer enabled")
     set(TSAN_FLAGS "-fsanitize=thread -fno-omit-frame-pointer -g")
@@ -16,6 +24,29 @@ if(ENABLE_TSAN)
     
     # Set environment variables for ThreadSanitizer
     set(ENV{TSAN_OPTIONS} "halt_on_error=1:abort_on_error=1:detect_thread_leaks=false")
+endif()
+
+if(ENABLE_ASAN)
+    message(STATUS "AddressSanitizer enabled")
+    set(ASAN_FLAGS "-fsanitize=address -fno-omit-frame-pointer -g")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${ASAN_FLAGS}")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${ASAN_FLAGS}")
+    
+    # Set environment variables for AddressSanitizer
+    set(ENV{ASAN_OPTIONS} "halt_on_error=1:abort_on_error=1:check_initialization_order=1:strict_init_order=1")
+endif()
+
+if(ENABLE_LSAN)
+    message(STATUS "LeakSanitizer enabled")
+    if(NOT ENABLE_ASAN)
+        # LSan can be used standalone
+        set(LSAN_FLAGS "-fsanitize=leak -fno-omit-frame-pointer -g")
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${LSAN_FLAGS}")
+        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${LSAN_FLAGS}")
+    endif()
+    
+    # Set environment variables for LeakSanitizer
+    set(ENV{LSAN_OPTIONS} "halt_on_error=1:abort_on_error=1:print_stats=1")
 endif()
 
 # Header-only library
@@ -96,16 +127,23 @@ target_link_libraries(hazard_tests
         pthread
 )
 
+# Add dynamic only test executable
+add_executable(dynamic_only_test
+    hazard/test/dynamic_only_test.cpp
+)
+
+# Link dynamic only test executable with Google Test and the library
+target_link_libraries(dynamic_only_test
+    PRIVATE
+        ${PROJECT_NAME}
+        gtest
+        gtest_main
+        pthread
+)
+
 # Add tests to CTest
 include(GoogleTest)
-if(NOT ENABLE_TSAN)
-    # Only discover tests when not using ThreadSanitizer to avoid build-time execution issues
-    gtest_discover_tests(containers_tests)
-    gtest_discover_tests(hazard_tests)
-    gtest_discover_tests(stack_static_tests)
-else()
-    # When using TSan, add tests manually without discovery
-    add_test(NAME containers_tests COMMAND containers_tests)
-    add_test(NAME hazard_tests COMMAND hazard_tests)
-    add_test(NAME stack_static_tests COMMAND stack_static_tests)
-endif()
+# Always discover tests regardless of sanitizer settings
+gtest_discover_tests(containers_tests)
+gtest_discover_tests(hazard_tests)
+gtest_discover_tests(stack_static_tests)
