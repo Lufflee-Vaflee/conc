@@ -77,24 +77,20 @@ protected:
 TEST_F(HazardPointerStressTest, HighContentionDefaultDomain) {
     const int num_threads = std::thread::hardware_concurrency() * 2; // More threads
     const int num_iterations = 20000; // More iterations
-    
+
     std::vector<std::atomic<StressTestNode*>> shared_pointers(5); // MUCH fewer shared pointers to increase contention
-    
+
     // Initialize shared pointers
     for (size_t i = 0; i < shared_pointers.size(); ++i) {
-        shared_pointers[i].store(node_pool[i].get());
+        shared_pointers[i].store(new StressTestNode(i));
     }
-    
+
     std::vector<std::thread> threads;
     std::atomic<long> total_protections{0};
     std::atomic<long> total_retirements{0};
     std::atomic<long> successful_try_protects{0};
     std::atomic<long> failed_try_protects{0};
-    
-    // Thread-safe storage for dynamically created nodes
-    std::mutex node_pool_mutex;
-    std::vector<std::unique_ptr<StressTestNode>> dynamic_nodes;
-    
+
     for (int t = 0; t < num_threads; ++t) {
         threads.emplace_back([&, t]() {
             auto hp = hazard_pointer<StressTestNode>::make_hazard_pointer();
@@ -102,11 +98,11 @@ TEST_F(HazardPointerStressTest, HighContentionDefaultDomain) {
             std::mt19937 gen(rd());
             std::uniform_int_distribution<> ptr_dist(0, shared_pointers.size() - 1);
             std::uniform_int_distribution<> op_dist(0, 100);
-            
+
             for (int i = 0; i < num_iterations; ++i) {
                 int ptr_idx = ptr_dist(gen);
                 int operation = op_dist(gen);
-                
+
                 if (operation < 40) {
                     // 40% chance: protect operation
                     auto* ptr = hp.protect(shared_pointers[ptr_idx]);
@@ -116,11 +112,10 @@ TEST_F(HazardPointerStressTest, HighContentionDefaultDomain) {
                         
                         // Use the protected data - no delay to increase contention
                         [[maybe_unused]] auto val = ptr->value.load();
-                        
                         ptr->decrement_ref();
                     }
                     hp.reset_protection();
-                    
+
                 } else if (operation < 80) {
                     // 40% chance: try_protect operation (increased from 20%)
                     StressTestNode* ptr = shared_pointers[ptr_idx].load();
@@ -136,32 +131,37 @@ TEST_F(HazardPointerStressTest, HighContentionDefaultDomain) {
                     } else {
                         failed_try_protects.fetch_add(1);
                     }
-                    
+
                 } else {
                     // 20% chance: pointer replacement (increased from 10%)
                     auto old_ptr = shared_pointers[ptr_idx].load();
                     if (old_ptr && (i % 10 == 0)) { // Much more frequent retirement
                         auto new_ptr = new StressTestNode(i * 1000 + t);
-                        
+
                         if (shared_pointers[ptr_idx].compare_exchange_strong(old_ptr, new_ptr)) {
                             hazard_pointer<StressTestNode>::retire(old_ptr);
                             total_retirements.fetch_add(1);
+                        } else {
+                            // CAS failed
+                            delete new_ptr;
                         }
                     }
                 }
-                
-                // No delays - maximum contention
             }
         });
     }
-    
+
     for (auto& t : threads) {
         t.join();
     }
-    
+
+    for (auto& ptr : shared_pointers) {
+        delete ptr.load();
+    }
+
     EXPECT_GT(total_protections.load(), 0);
     EXPECT_GT(successful_try_protects.load(), 0);
-    
+
     std::cout << "Default domain stress test results:\n"
               << "  Total protections: " << total_protections.load() << "\n"
               << "  Successful try_protects: " << successful_try_protects.load() << "\n"
@@ -173,17 +173,17 @@ TEST_F(HazardPointerStressTest, HighContentionDefaultDomain) {
 TEST_F(HazardPointerStressTest, SmallDomainExhaustion) {
     const int num_threads = 16;
     const int num_iterations = 1000;
-    
+
     std::atomic<StressTestNode*> shared_ptr{node_pool[0].get()};
     std::vector<std::thread> threads;
     std::atomic<long> protection_count{0};
     std::atomic<long> assertion_failures{0};
-    
+
     for (int t = 0; t < num_threads; ++t) {
         threads.emplace_back([&]() {
             try {
                 auto hp = hazard_pointer<StressTestNode, small_domain<StressTestNode>>::make_hazard_pointer();
-                
+
                 for (int i = 0; i < num_iterations; ++i) {
                     auto* ptr = hp.protect(shared_ptr);
                     if (ptr) {
@@ -197,11 +197,11 @@ TEST_F(HazardPointerStressTest, SmallDomainExhaustion) {
             }
         });
     }
-    
+
     for (auto& t : threads) {
         t.join();
     }
-    
+
     // With small domain, we might hit assertions when cells are exhausted
     std::cout << "Small domain test results:\n"
               << "  Protection count: " << protection_count.load() << "\n"
@@ -213,37 +213,37 @@ TEST_F(HazardPointerStressTest, LargeDomainScalability) {
     const int num_threads = 32;
     const int num_iterations = 5000;
     const int num_shared_ptrs = 20;
-    
+
     std::vector<std::atomic<StressTestNode*>> shared_pointers(num_shared_ptrs);
     for (int i = 0; i < num_shared_ptrs; ++i) {
         shared_pointers[i].store(node_pool[i].get());
     }
-    
+
     std::vector<std::thread> threads;
     std::atomic<long> operations_completed{0};
-    
+
     // Synchronization barrier for simultaneous start
     std::barrier sync_point(num_threads);
-    
+
     auto start_time = std::chrono::steady_clock::now();
-    
+
     for (int t = 0; t < num_threads; ++t) {
         threads.emplace_back([&, t]() {
             auto hp = hazard_pointer<StressTestNode, large_domain<StressTestNode>>::make_hazard_pointer();
             std::random_device rd;
             std::mt19937 gen(rd());
             std::uniform_int_distribution<> ptr_dist(0, num_shared_ptrs - 1);
-            
+
             sync_point.arrive_and_wait(); // Wait for all threads to be ready
-            
+
             for (int i = 0; i < num_iterations; ++i) {
                 int idx = ptr_dist(gen);
-                
+
                 // Protect and use multiple pointers simultaneously
                 auto* ptr1 = hp.protect(shared_pointers[idx]);
                 if (ptr1) {
                     [[maybe_unused]] auto val = ptr1->value.load();
-                    
+
                     // Switch protection to different pointer
                     int new_idx = (idx + 1) % num_shared_ptrs;
                     auto* ptr2 = hp.protect(shared_pointers[new_idx]);
@@ -251,26 +251,26 @@ TEST_F(HazardPointerStressTest, LargeDomainScalability) {
                         [[maybe_unused]] auto val2 = ptr2->value.load();
                     }
                 }
-                
+
                 hp.reset_protection();
                 operations_completed.fetch_add(1);
             }
         });
     }
-    
+
     for (auto& t : threads) {
         t.join();
     }
-    
+
     auto end_time = std::chrono::steady_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
-    
+
     EXPECT_EQ(operations_completed.load(), num_threads * num_iterations);
-    
+
     std::cout << "Large domain scalability test results:\n"
               << "  Operations completed: " << operations_completed.load() << "\n"
               << "  Duration: " << duration.count() << " ms\n"
-              << "  Operations per second: " 
+              << "  Operations per second: "
               << (operations_completed.load() * 1000.0 / duration.count()) << "\n";
 }
 
@@ -279,94 +279,81 @@ TEST_F(HazardPointerStressTest, MemoryPressureTest) {
     const int num_threads = 8;
     const int num_iterations = 2000;
     const int retire_frequency = 10;
-    
+
     std::vector<std::atomic<StressTestNode*>> shared_pointers(10);
     for (size_t i = 0; i < shared_pointers.size(); ++i) {
-        shared_pointers[i].store(node_pool[i].get());
+        shared_pointers[i].store(new StressTestNode(i));
     }
-    
+
     std::vector<std::thread> threads;
     std::atomic<long> nodes_created{0};
     std::atomic<long> nodes_retired{0};
     std::atomic<long> protection_operations{0};
-    
-    std::mutex node_creation_mutex;
-    std::vector<std::unique_ptr<StressTestNode>> thread_local_nodes;
-    
+
     for (int t = 0; t < num_threads; ++t) {
         threads.emplace_back([&, t]() {
             auto hp = hazard_pointer<StressTestNode>::make_hazard_pointer();
             std::random_device rd;
             std::mt19937 gen(rd());
             std::uniform_int_distribution<> ptr_dist(0, shared_pointers.size() - 1);
-            
-            std::vector<std::unique_ptr<StressTestNode>> local_nodes;
-            
+
             for (int i = 0; i < num_iterations; ++i) {
                 int idx = ptr_dist(gen);
-                
+
                 // Protection operation
                 auto* ptr = hp.protect(shared_pointers[idx]);
                 if (ptr) {
                     protection_operations.fetch_add(1);
                     ptr->increment_ref();
-                    
+
                     // Simulate work
                     [[maybe_unused]] auto val = ptr->value.load();
-                    
+
                     ptr->decrement_ref();
                 }
                 hp.reset_protection();
-                
+
                 // Occasionally create new nodes and retire old ones
                 if (i % retire_frequency == 0) {
-                    auto new_node = std::make_unique<StressTestNode>(i * 1000 + t);
+                    auto* new_ptr = new StressTestNode(i * 1000 + t);
                     nodes_created.fetch_add(1);
-                    
-                    auto* new_ptr = new_node.get();
+
                     auto* old_ptr = shared_pointers[idx].exchange(new_ptr);
-                    
+
                     if (old_ptr) {
                         hazard_pointer<StressTestNode>::retire(old_ptr);
                         nodes_retired.fetch_add(1);
                     }
-                    
-                    local_nodes.push_back(std::move(new_node));
                 }
-                
+
                 // Force cleanup trigger by creating many retirements
                 if (i % 100 == 0) {
                     for (int j = 0; j < 5; ++j) {
-                        auto temp_node = std::make_unique<StressTestNode>(j);
-                        hazard_pointer<StressTestNode>::retire(temp_node.release());
+                        auto* temp_node = new StressTestNode(j);
+                        hazard_pointer<StressTestNode>::retire(temp_node);
                         nodes_retired.fetch_add(1);
                     }
                 }
             }
-            
-            // Move local nodes to shared storage
-            {
-                std::lock_guard<std::mutex> lock(node_creation_mutex);
-                for (auto& node : local_nodes) {
-                    thread_local_nodes.push_back(std::move(node));
-                }
-            }
         });
     }
-    
+
     for (auto& t : threads) {
         t.join();
     }
-    
+
+    for(auto& atomic_ptr : shared_pointers) {
+        delete atomic_ptr.load();
+    }
+
     EXPECT_GT(protection_operations.load(), 0);
     EXPECT_GT(nodes_created.load(), 0);
     EXPECT_GT(nodes_retired.load(), 0);
-    
+
     std::cout << "Memory pressure test results:\n"
               << "  Protection operations: " << protection_operations.load() << "\n"
               << "  Nodes created: " << nodes_created.load() << "\n"
-              << "  Nodes retired: " << nodes_retired.load() << "\n"
-              << "  Thread local nodes kept alive: " << thread_local_nodes.size() << "\n";
+              << "  Nodes retired: " << nodes_retired.load() << "\n";
 }
 
 // ABA problem simulation test
