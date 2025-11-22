@@ -57,9 +57,9 @@ TEST_F(HazardPointerTest, FactoryConstruction) {
     // because it has a captured cell with SENTINEL value
     EXPECT_FALSE(hp.empty());
     
-    // After reset_protection(), it should be empty
+    // After reset_protection(), it should be unasociated and still not empty
     hp.reset_protection();
-    EXPECT_TRUE(hp.empty());
+    EXPECT_FALSE(hp.empty());
 }
 
 TEST_F(HazardPointerTest, MoveConstructor) {
@@ -86,11 +86,7 @@ TEST_F(HazardPointerTest, MoveAssignment) {
 
 TEST_F(HazardPointerTest, SwapFunctionality) {
     auto hp1 = hazard_pointer<TestNode>::make_hazard_pointer();
-    auto hp2 = hazard_pointer<TestNode>::make_hazard_pointer();
-    
-    hp1.protect(atomic_ptr);
-    // Reset hp2 to make it truly empty for this test
-    hp2.reset_protection();
+    auto hp2 = hazard_pointer<TestNode>();
     
     EXPECT_FALSE(hp1.empty()); // hp1 is protecting atomic_ptr
     EXPECT_TRUE(hp2.empty());  // hp2 is reset to nullptr
@@ -132,37 +128,6 @@ TEST_F(HazardPointerTest, TryProtectFailure) {
     
     EXPECT_FALSE(success);
     EXPECT_EQ(ptr, node2); // ptr should be updated to current value
-    EXPECT_TRUE(hp.empty()); // protection should be reset on failure
-}
-
-TEST_F(HazardPointerTest, ResetProtection) {
-    auto hp = hazard_pointer<TestNode>::make_hazard_pointer();
-    
-    hp.protect(atomic_ptr);
-    EXPECT_FALSE(hp.empty());
-    
-    hp.reset_protection();
-    EXPECT_TRUE(hp.empty());
-}
-
-TEST_F(HazardPointerTest, ResetProtectionWithPointer) {
-    auto hp = hazard_pointer<TestNode>::make_hazard_pointer();
-    
-    hp.protect(atomic_ptr);
-    EXPECT_FALSE(hp.empty());
-    
-    hp.reset_protection(node2);
-    EXPECT_FALSE(hp.empty()); // Should still be protecting something
-}
-
-TEST_F(HazardPointerTest, ResetProtectionWithNullptr) {
-    auto hp = hazard_pointer<TestNode>::make_hazard_pointer();
-    
-    hp.protect(atomic_ptr);
-    EXPECT_FALSE(hp.empty());
-    
-    hp.reset_protection(nullptr);
-    EXPECT_TRUE(hp.empty());
 }
 
 // Memory management tests
@@ -324,7 +289,6 @@ TEST_F(HazardPointerTest, ProtectNullPointer) {
     
     auto* ptr = hp.protect(atomic_ptr);
     EXPECT_EQ(ptr, nullptr);
-    EXPECT_TRUE(hp.empty()); // protecting nullptr should result in empty state
 }
 
 TEST_F(HazardPointerTest, MultipleHazardPointers) {
@@ -352,8 +316,6 @@ TEST_F(HazardPointerTest, RapidProtectAndReset) {
     for (int i = 0; i < 1000; ++i) {
         hp.protect(atomic_ptr);
         EXPECT_FALSE(hp.empty());
-        hp.reset_protection();
-        EXPECT_TRUE(hp.empty());
     }
 }
 

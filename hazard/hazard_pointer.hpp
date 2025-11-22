@@ -1,3 +1,5 @@
+#pragma once
+
 #include "domain.hpp"
 #include <atomic>
 #include <cstddef>
@@ -53,20 +55,21 @@ class hazard_pointer {
 
     hazard_pointer& operator=(hazard_pointer&& hp) noexcept {
         swap(hp);
-        hp.reset_protection();
+        hp.m_cell->pointer.store(nullptr, std::memory_order_release);
+        hp.m_cell = nullptr;
         return *this;
     }
 
     ~hazard_pointer() {
         if(m_cell != nullptr) {
-            reset_protection();
+            m_cell->pointer.store(nullptr, std::memory_order_release);
         }
     }
 
    public:
     [[nodiscard]] 
     bool empty() const noexcept {
-        return m_cell->pointer == nullptr;
+        return m_cell == nullptr;
     }
 
     T* protect(const std::atomic<T*>& src) noexcept {
@@ -102,7 +105,7 @@ class hazard_pointer {
 
     void reset_protection(std::nullptr_t t = nullptr) noexcept {
         assert(this->m_cell != nullptr);
-        m_cell->pointer.store(t, std::memory_order_release);
+        m_cell->pointer.store(s_domain.SENTINEL, std::memory_order_release);
     }
 
 

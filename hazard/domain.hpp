@@ -1,11 +1,10 @@
 #pragma once
 
 #include <atomic>
-#include <new>
-#include <type_traits>
 #include <vector>
 #include <array>
 #include <cassert>
+#include <utility>
 
 #include <allocator.hpp>
 
@@ -32,24 +31,24 @@ class hazard_domain {
 
             if(it->pointer.compare_exchange_strong(
                 null,
-                SENTINEL
+                SENTINEL,
+                std::memory_order_acq_rel,
+                std::memory_order_relaxed
             )) {
-                break;
+                return &(*it);
             }
         }
 
         assert(it != m_acquire_list.end());
-
-
-        return &(*it);
+        std::unreachable();
     }
 
     void retire(T* data) {
+        /*thread_local*/ tl_retire.emplace_back(data);
+
         if(tl_retire.size() > max_objects * 2) {
             delete_hazards();
         }
-
-        /*thread_local*/ tl_retire.emplace_back(data);
     }
 
     void delete_hazards() noexcept {
@@ -87,6 +86,7 @@ class hazard_domain {
     alignas(T) inline static 
      char sentinel_storage[sizeof(T)];
 
+   public:
     inline static 
      T* const SENTINEL = reinterpret_cast<T*>(&sentinel_storage);
 };

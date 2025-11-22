@@ -18,7 +18,7 @@ class stack {
     };
 
    public:
-    using hazard_domain = conc::hazard_domain<node, 16, stack<T>>;
+    using hazard_domain = conc::hazard_domain<node, 32, stack<T>>;
 
     stack() = default;
     stack(stack const&) = delete;
