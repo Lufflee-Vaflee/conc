@@ -5,6 +5,7 @@
 #include <array>
 #include <cassert>
 #include <utility>
+#include <algorithm>
 
 #include <allocator.hpp>
 
@@ -35,6 +36,12 @@ class hazard_domain {
                 std::memory_order_acq_rel,
                 std::memory_order_relaxed
             )) {
+
+//                tl_block& tl_data = get_tl_data();
+//                if(!tl_data.delete_turn && (tl_data.tl_retire.size() > tl_data.amortization_factor)) {
+//                    delete_hazards();
+//                }
+
                 return &(*it);
             }
         }
@@ -44,29 +51,46 @@ class hazard_domain {
     }
 
     void retire(T* data) {
-        /*thread_local*/ tl_retire.emplace_back(data);
+        tl_block& tl_data = get_tl_data();
+        tl_data.tl_retire.emplace_back(data);
 
-        if(tl_retire.size() > max_objects * 2) {
+        if(/*tl_data.delete_turn && */(tl_data.tl_retire.size() > tl_data.amortization_factor)) {
             delete_hazards();
         }
     }
 
     void delete_hazards() noexcept {
-        for(std::size_t i = 0; i < tl_retire.size(); ++i) {
-            if(!scan_for_hazard(tl_retire[i])) {
-                delete tl_retire[i];
-                tl_retire[i] = tl_retire[tl_retire.size() - 1];
-                tl_retire.pop_back();
+        tl_block& tl_data = get_tl_data();
+        auto snapshot = acquire_snapshot();
+        auto& retire_list = tl_data.tl_retire;
+
+        for(std::size_t i = 0; i < retire_list.size(); ++i) {
+            if(!scan_for_hazard(retire_list[i], snapshot)) {
+                delete retire_list[i];
+                retire_list[i] = retire_list[retire_list.size() - 1];
+                retire_list.pop_back();
                 i--;
             }
         }
+
+        tl_data.delete_turn = !tl_data.delete_turn;
+        tl_data.amortization_factor = std::min(tl_data.amortization_factor * 2, max_objects * 32);
     }
 
    private:
-    bool scan_for_hazard(T* pointer) noexcept {
-        for(auto it = m_acquire_list.begin(); it != m_acquire_list.end(); ++it) {
+    std::array<T*, max_objects> acquire_snapshot() noexcept {
+        std::array<T*, max_objects> result;
+        for(std::size_t i = 0; i < max_objects; ++i) {
+            result[i] = m_acquire_list[i].pointer.load(std::memory_order_acquire);
+        }
+
+        return result;
+    }
+
+    bool scan_for_hazard(T* pointer, std::array<T*, max_objects> const& snapshot) noexcept {
+        for(auto& ptr : snapshot) {
             [[unlikely]]
-            if(pointer == it->pointer.load()) {
+            if(pointer == ptr) {
                 return true;
             }
         }
@@ -78,8 +102,17 @@ class hazard_domain {
     inline static
      std::array<domain_cell<T>, max_objects> m_acquire_list;
 
-    inline static thread_local
-     std::vector<T*> tl_retire;
+    struct tl_block {
+         std::vector<T*> tl_retire;
+         bool delete_turn = false;
+         std::size_t amortization_factor = max_objects;
+    };
+
+    tl_block& get_tl_data() noexcept {
+        thread_local tl_block data;
+        return data;
+    }
+
 
     // placeholder value to a aligned storage to mark cell that is captured and yet to be used
     // could use reinterpreted cast to domain address, but made for compiler/standard grooming

@@ -3,6 +3,7 @@
 #include "domain.hpp"
 #include <atomic>
 #include <cstddef>
+#include <thread>
 
 namespace conc {
 
